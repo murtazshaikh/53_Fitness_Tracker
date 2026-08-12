@@ -109,7 +109,8 @@ User              id, email, passwordHash, name, unitSystem(METRIC|IMPERIAL), cr
 
 ExerciseTemplate  id, title, type(ExerciseType),
                   primaryMuscleGroup(MuscleGroup),
-                  secondaryMuscleGroups(MuscleGroup[]),
+                  secondaryMuscleGroups(MuscleGroup[]),   → sets count against both
+                                                            for per-muscle volume later
                   equipmentCategory(EquipmentCategory),
                   isCustom, ownerId?          → null = seeded, set = user's custom
 
@@ -117,7 +118,8 @@ Workout           id, userId, title, description?,
                   status(IN_PROGRESS|COMPLETED),
                   startTime, endTime?, draft(Json?), createdAt, updatedAt
 
-WorkoutExercise   id, workoutId, exerciseTemplateId, index, notes?, supersetId?
+WorkoutExercise   id, workoutId, exerciseTemplateId, index, notes?,
+                  supersetId?, restSeconds?
 
 SetEntry          id, workoutExerciseId, index,
                   type(NORMAL|WARMUP|FAILURE|DROPSET),
@@ -180,6 +182,13 @@ lookup driving which inputs a set row renders and which columns may be non-null:
   type populates it and no UI reads it.
 - **`supersetId` column exists, superset UI does not.** One nullable field now beats a
   migration later.
+- **`restSeconds` column exists, the countdown does not.** Rest is a per-exercise value
+  (not global, not per-set), and `null` means *off* rather than zero — a zero would start a
+  timer that immediately fires. Its natural home is a routine: you configure it once in the
+  plan and the live session inherits it. Since routines are out of scope, building the
+  countdown now would mean re-picking a duration every single workout — more friction than
+  the feature removes. The column ships now so the timer can arrive with routines without a
+  migration on a table that by then holds real rows.
 
 ## Screens
 
@@ -278,6 +287,15 @@ skip this layer entirely.
 
 ## Out of scope for v1
 
-Routines, routine folders, body measurements, superset UI, RPE input, rest timers, PRs,
-charts, social feed, and incremental-sync endpoints. Each slots into this schema without a
-migration — that is why the standard enums and shapes were adopted now.
+Routines, routine folders, body measurements, superset UI, RPE input, rest-timer countdown,
+PRs, charts, social feed, and incremental-sync endpoints. Each slots into this schema
+without a migration — that is why the standard enums and shapes were adopted now.
+
+**Rest timers ship with routines.** They are a plan-level value the live session inherits;
+delivering them before routines exist means re-picking a duration every workout. The
+`restSeconds` column is in place so that work is additive.
+
+**Routines also unlock per-muscle set counts and estimated duration.** Set counts attribute
+to an exercise's primary *and* secondary muscle groups, and estimated duration is
+`Σ(set execution) + Σ(rest gaps)` — which is why `secondaryMuscleGroups` and `restSeconds`
+both exist in the v1 schema despite having no v1 UI.
