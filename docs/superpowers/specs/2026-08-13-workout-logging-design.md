@@ -137,6 +137,14 @@ logged. On Finish, the blob is normalized into `WorkoutExercise` and `SetEntry` 
 transaction, `draft` is nulled, `endTime` is set, and status flips to `COMPLETED`. History
 and every future feature query clean relational data and never touch JSON.
 
+**Completion is draft-only.** Each draft set carries a `completed` flag so the UI can tick
+sets off during the session, but there is no `completed` column on `SetEntry`. On finish,
+only completed sets are normalized; unticked sets are discarded, and an exercise left with
+no completed sets is dropped entirely. A finished workout therefore records what you *did*,
+not what you planned — which is what every history query wants. `index` on both
+`WorkoutExercise` and `SetEntry` is assigned from array position at normalization time,
+after the incomplete entries are filtered out, so indexes are always contiguous from 0.
+
 ### Enums
 
 **`ExerciseType`** — `weight_reps`, `reps_only`, `bodyweight_reps`,
