@@ -15,7 +15,9 @@ export function SummaryStats({
   summary: WorkoutSummary
   system: UnitSystemWire
 }) {
-  const parts: string[] = [`${summary.totalSets} sets`]
+  const parts: string[] = [
+    `${summary.totalSets} ${summary.totalSets === 1 ? 'set' : 'sets'}`,
+  ]
 
   if (summary.volumeKg !== null) {
     const v = kgToDisplay(summary.volumeKg, system)

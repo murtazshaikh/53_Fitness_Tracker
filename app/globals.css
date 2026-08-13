@@ -1,5 +1,13 @@
 @import "tailwindcss";
 
+/*
+ * The app is deliberately light-only for now: every screen uses explicit
+ * bg-white / text-neutral-* utilities. The scaffold shipped a
+ * prefers-color-scheme block that flipped --foreground to near-white, which
+ * rendered white text on those white surfaces for anyone using dark mode.
+ * Supporting dark properly means auditing every component, not toggling a
+ * variable — so the variable is gone rather than half-working.
+ */
 :root {
   --background: #ffffff;
   --foreground: #171717;
@@ -8,19 +16,34 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html {
+  color-scheme: light;
 }
 
 body {
   background: var(--background);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+/*
+ * Form controls inherit the page palette instead of the OS dark theme.
+ * This must live in @layer base: an unlayered element selector outranks
+ * Tailwind's utility classes, which silently strips bg-* from every button.
+ */
+@layer base {
+  input,
+  select,
+  textarea {
+    color: inherit;
+    background-color: transparent;
+  }
+
+  button {
+    color: inherit;
+  }
 }

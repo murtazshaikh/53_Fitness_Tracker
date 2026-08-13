@@ -84,7 +84,7 @@ test('unticked sets are discarded on finish', async ({ page }) => {
   await page.getByRole('button', { name: 'Finish' }).click()
 
   await expect(page).toHaveURL(/\/history/)
-  await expect(page.getByText('1 sets')).toBeVisible()
+  await expect(page.getByText('1 set', { exact: true })).toBeVisible()
   await expect(page.getByText('500 kg')).toBeVisible()
 })
 
