@@ -3,13 +3,9 @@ import Credentials from 'next-auth/providers/credentials'
 import { z } from 'zod'
 import { prisma } from './db'
 import { verifyPassword } from './password'
+import { UnauthorizedError } from './errors'
 
-export class UnauthorizedError extends Error {
-  constructor() {
-    super('Not authenticated')
-    this.name = 'UnauthorizedError'
-  }
-}
+export { UnauthorizedError }
 
 const credentialsSchema = z.object({
   email: z.email(),
