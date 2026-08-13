@@ -2330,15 +2330,19 @@ Expected: PASS, 6 tests.
 
 - [ ] **Step 10: Protect the app routes**
 
-Create `middleware.ts` at the repo root:
+Next 16 renamed `middleware.ts` to `proxy.ts`. This is not cosmetic: Middleware ran on the
+Edge Runtime, where Prisma's generated client fails because it imports `node:path`. Proxy
+defaults to the Node.js runtime, so importing `@/lib/auth` (and through it Prisma) works.
+Using `middleware.ts` here builds with warnings and breaks at runtime.
+
+Create `proxy.ts` at the repo root:
 
 ```ts
 import { auth } from '@/lib/auth'
 
 export default auth((req) => {
   if (!req.auth) {
-    const url = new URL('/login', req.nextUrl.origin)
-    return Response.redirect(url)
+    return Response.redirect(new URL('/login', req.nextUrl.origin))
   }
 })
 
@@ -2346,6 +2350,9 @@ export const config = {
   matcher: ['/workout/:path*', '/history/:path*', '/exercises/:path*'],
 }
 ```
+
+Verify: `curl -s -o /dev/null -w "%{http_code} %{redirect_url}" localhost:3000/workout`
+should print `302 http://localhost:3000/login`.
 
 - [ ] **Step 11: Commit**
 
