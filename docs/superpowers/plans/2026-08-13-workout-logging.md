@@ -268,13 +268,15 @@ git commit -m "chore: scaffold Next.js app, Vitest harness, and Postgres"
 Create `prisma/schema.prisma`:
 
 ```prisma
+// Prisma 7: the generator is "prisma-client" and `output` is required.
+// The datasource URL lives in prisma.config.ts, not here.
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum UnitSystem {
@@ -429,13 +431,31 @@ model SetEntry {
 Create `lib/db.ts`:
 
 ```ts
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '@/generated/prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+
+// Prisma 7 connects through a driver adapter rather than its own engine binary.
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL })
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient()
+export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+```
+
+Prisma 7 also needs `prisma.config.ts` at the repo root, `@prisma/adapter-pg` and
+`dotenv` installed, and `/generated` added to `.gitignore`:
+
+```ts
+import 'dotenv/config'
+import { defineConfig } from 'prisma/config'
+
+export default defineConfig({
+  schema: 'prisma/schema.prisma',
+  migrations: { path: 'prisma/migrations' },
+  datasource: { url: process.env['DATABASE_URL'] },
+})
 ```
 
 - [ ] **Step 3: Generate the migration**
@@ -444,10 +464,18 @@ if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
 bunx prisma migrate dev --name init
 ```
 
-- [ ] **Step 4: Add the partial unique index by hand**
+- [ ] **Step 4: Add the partial unique index in its own migration**
 
-Prisma cannot express a partial index, so append this to the generated
-`prisma/migrations/<timestamp>_init/migration.sql`:
+Prisma cannot express a partial index. Do NOT edit the already-applied init migration —
+that changes its checksum and forces `migrate reset`, which destroys the database and
+which Prisma 7 refuses to run without explicit user consent. Create a separate migration
+instead:
+
+```bash
+bunx prisma migrate dev --create-only --name active_workout_partial_index
+```
+
+Then replace the generated (empty) `migration.sql` with:
 
 ```sql
 -- Enforce at most one in-progress workout per user.
@@ -457,10 +485,17 @@ CREATE UNIQUE INDEX "Workout_one_active_per_user"
   WHERE "status" = 'IN_PROGRESS';
 ```
 
-Re-apply it:
+Apply it:
 
 ```bash
-bunx prisma migrate reset --force
+bunx prisma migrate dev
+```
+
+Verify the index exists with its WHERE clause:
+
+```bash
+docker compose exec -T db psql -U fitness -d fitness -tAc \
+  "select indexdef from pg_indexes where indexname='Workout_one_active_per_user';"
 ```
 
 - [ ] **Step 5: Write the failing test for the constraint**
@@ -526,7 +561,12 @@ describe('one in-progress workout per user', () => {
 - [ ] **Step 6: Run the tests**
 
 Run: `bunx vitest run lib/db.test.ts`
-Expected: PASS, 3 tests. If the first test fails with "expected to throw", the partial index was not applied — re-check Step 4 and re-run `bunx prisma migrate reset --force`.
+Expected: PASS, 3 tests. If the first test fails with "expected to throw", the partial
+index was not applied — re-check Step 4 and re-run `bunx prisma migrate dev`.
+
+Two harness notes: the test file needs `// @vitest-environment node` as its first line
+(Prisma cannot run under jsdom), and `vitest.setup.ts` needs `import 'dotenv/config'`
+because Vitest does not populate `process.env` from `.env` on its own.
 
 - [ ] **Step 7: Commit**
 
