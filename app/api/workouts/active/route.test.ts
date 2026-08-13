@@ -46,9 +46,6 @@ const patchReq = (body?: unknown) =>
     body: body === undefined ? undefined : JSON.stringify(body),
   })
 
-const startReq = () =>
-  new Request('http://localhost/api/workouts/start', { method: 'POST' })
-
 describe('live session endpoints', () => {
   beforeEach(async () => {
     await prisma.workout.deleteMany()
@@ -62,7 +59,7 @@ describe('live session endpoints', () => {
 
   it('starts a workout and returns an empty draft', async () => {
     const { start } = await load(userId)
-    const res = await start(startReq())
+    const res = await start()
 
     expect(res.status).toBe(201)
     const body = await res.json()
@@ -72,15 +69,15 @@ describe('live session endpoints', () => {
 
   it('returns 409 when a session is already live', async () => {
     const { start } = await load(userId)
-    await start(startReq())
-    const res = await start(startReq())
+    await start()
+    const res = await start()
 
     expect(res.status).toBe(409)
   })
 
   it('returns 401 with no session', async () => {
     const { start } = await load(null)
-    expect((await start(startReq())).status).toBe(401)
+    expect((await start()).status).toBe(401)
   })
 
   it('GET returns null when nothing is in progress', async () => {
@@ -93,7 +90,7 @@ describe('live session endpoints', () => {
 
   it('PATCH saves the draft and GET reads it back', async () => {
     const { start, active } = await load(userId)
-    await start(startReq())
+    await start()
 
     const draft = {
       title: 'Chest Day',
@@ -117,7 +114,7 @@ describe('live session endpoints', () => {
 
   it('PATCH rejects a malformed draft with 400', async () => {
     const { start, active } = await load(userId)
-    await start(startReq())
+    await start()
 
     const res = await active.PATCH(patchReq({
       draft: { title: '', description: null, exercises: [] },
@@ -135,7 +132,7 @@ describe('live session endpoints', () => {
 
   it('never exposes another user’s session', async () => {
     const mine = await load(userId)
-    await mine.start(startReq())
+    await mine.start()
 
     const theirs = await load(otherId)
     expect(await (await theirs.active.GET()).json()).toEqual({ workout: null })
@@ -143,7 +140,7 @@ describe('live session endpoints', () => {
 
   it('DELETE discards the session', async () => {
     const { start, active } = await load(userId)
-    await start(startReq())
+    await start()
 
     const res = await active.DELETE()
     expect(res.status).toBe(204)

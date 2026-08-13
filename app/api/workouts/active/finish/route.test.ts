@@ -57,9 +57,6 @@ async function startWith(draft: unknown) {
   })
 }
 
-const post = () =>
-  new Request('http://localhost/api/workouts/active/finish', { method: 'POST' })
-
 describe('POST /api/workouts/active/finish', () => {
   beforeEach(async () => {
     await prisma.workout.deleteMany()
@@ -83,7 +80,7 @@ describe('POST /api/workouts/active/finish', () => {
     })
 
     const finish = await loadFinish(userId)
-    const res = await finish(post())
+    const res = await finish()
     expect(res.status).toBe(200)
 
     const workout = await prisma.workout.findFirst({
@@ -108,7 +105,7 @@ describe('POST /api/workouts/active/finish', () => {
     })
 
     const finish = await loadFinish(userId)
-    await finish(post())
+    await finish()
 
     const sets = await prisma.setEntry.findMany()
     expect(sets).toHaveLength(1)
@@ -125,7 +122,7 @@ describe('POST /api/workouts/active/finish', () => {
     })
 
     const finish = await loadFinish(userId)
-    const res = await finish(post())
+    const res = await finish()
 
     expect(res.status).toBe(400)
     expect(JSON.stringify(await res.json())).toContain('distance')
@@ -141,7 +138,7 @@ describe('POST /api/workouts/active/finish', () => {
     })
 
     const finish = await loadFinish(userId)
-    await finish(post())
+    await finish()
 
     const workout = await prisma.workout.findFirst()
     expect(workout!.status).toBe('IN_PROGRESS')
@@ -158,7 +155,7 @@ describe('POST /api/workouts/active/finish', () => {
     })
 
     const finish = await loadFinish(userId)
-    expect((await finish(post())).status).toBe(200)
+    expect((await finish()).status).toBe(200)
 
     const sets = await prisma.setEntry.findMany()
     expect(sets[0].distanceMeters).toBe(5000)
@@ -168,7 +165,7 @@ describe('POST /api/workouts/active/finish', () => {
     await startWith({ title: 'T', description: null, exercises: [] })
 
     const finish = await loadFinish(userId)
-    const res = await finish(post())
+    const res = await finish()
 
     expect(res.status).toBe(400)
     expect(await prisma.workout.count({ where: { status: 'IN_PROGRESS' } })).toBe(1)
@@ -176,7 +173,7 @@ describe('POST /api/workouts/active/finish', () => {
 
   it('returns 404 when no session is live', async () => {
     const finish = await loadFinish(userId)
-    expect((await finish(post())).status).toBe(404)
+    expect((await finish()).status).toBe(404)
   })
 
   it('frees the user to start another workout afterwards', async () => {
@@ -189,7 +186,7 @@ describe('POST /api/workouts/active/finish', () => {
     })
 
     const finish = await loadFinish(userId)
-    await finish(post())
+    await finish()
 
     await expect(prisma.workout.create({
       data: { userId, title: 'Next', status: 'IN_PROGRESS' },

@@ -15,7 +15,7 @@ export type SetField = 'weight' | 'reps' | 'duration' | 'distance'
 export type UnitSystemWire = 'metric' | 'imperial'
 
 /** One set inside the draft blob. `completed` is draft-only and never persisted as a column. */
-export interface DraftSet {
+export type DraftSet = {
   type: SetTypeWire
   weightKg: number | null
   reps: number | null
@@ -25,7 +25,7 @@ export interface DraftSet {
   completed: boolean
 }
 
-export interface DraftExercise {
+export type DraftExercise = {
   exerciseTemplateId: string
   notes: string | null
   restSeconds: number | null
@@ -33,7 +33,7 @@ export interface DraftExercise {
   sets: DraftSet[]
 }
 
-export interface WorkoutDraft {
+export type WorkoutDraft = {
   title: string
   description: string | null
   exercises: DraftExercise[]

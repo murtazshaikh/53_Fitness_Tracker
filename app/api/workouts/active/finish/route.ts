@@ -1,4 +1,5 @@
 import { prisma } from '@/lib/db'
+import { Prisma } from '@/generated/prisma/client'
 import { requireUserId } from '@/lib/auth'
 import { handleApiError } from '@/lib/apiError'
 import { workoutDraftSchema, validateAgainstTypes } from '@/lib/workout/draft'
@@ -82,7 +83,8 @@ export async function POST() {
         data: {
           status: 'COMPLETED',
           endTime: new Date(),
-          draft: null,
+          // Prisma distinguishes JSON null from SQL NULL; DbNull clears the column.
+          draft: Prisma.DbNull,
           title: draft.title,
           description: draft.description,
         },
