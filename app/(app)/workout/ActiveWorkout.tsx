@@ -28,7 +28,7 @@ export function ActiveWorkout({
   const [previous, setPrevious] = useState<Record<string, string[]>>({})
 
   const {
-    draft, saveState, setTitle,
+    draft, saveState, flush, setTitle,
     addExercise, removeExercise, addSet, updateSet, removeSet,
   } = useWorkoutDraft(workout.draft)
 
@@ -73,6 +73,16 @@ export function ActiveWorkout({
     setFinishing(true)
     setError(null)
     try {
+      // Flush first: finish reads the server's copy of the draft, and the autosave
+      // debounce may not have fired yet. Without this, finishing quickly after
+      // logging a set rejects with "complete at least one set".
+      const saved = await flush()
+      if (!saved) {
+        setError('Could not save your workout. Check your connection and try again.')
+        setFinishing(false)
+        return
+      }
+
       const res = await fetch('/api/workouts/active/finish', { method: 'POST' })
       if (!res.ok) {
         const body = await res.json().catch(() => ({}))

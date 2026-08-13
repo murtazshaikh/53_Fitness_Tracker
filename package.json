@@ -14,7 +14,8 @@
     "db:seed": "bun prisma/seed.ts",
     "db:test:migrate": "DATABASE_URL=postgresql://fitness:fitness@localhost:5433/fitness_test?schema=public prisma migrate deploy",
     "typecheck": "tsc --noEmit",
-    "check": "bun run typecheck && bun run test"
+    "check": "bun run typecheck && bun run test",
+    "test:e2e": "playwright test"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
@@ -27,6 +28,7 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
+    "@playwright/test": "^1.62.1",
     "@tailwindcss/postcss": "^4",
     "@testing-library/jest-dom": "^7.0.1",
     "@testing-library/react": "^16.3.2",
