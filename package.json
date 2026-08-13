@@ -12,7 +12,9 @@
     "db:up": "docker compose up -d",
     "db:migrate": "prisma migrate dev",
     "db:seed": "bun prisma/seed.ts",
-    "db:test:migrate": "DATABASE_URL=postgresql://fitness:fitness@localhost:5433/fitness_test?schema=public prisma migrate deploy"
+    "db:test:migrate": "DATABASE_URL=postgresql://fitness:fitness@localhost:5433/fitness_test?schema=public prisma migrate deploy",
+    "typecheck": "tsc --noEmit",
+    "check": "bun run typecheck && bun run test"
   },
   "dependencies": {
     "@prisma/adapter-pg": "^7.9.1",
