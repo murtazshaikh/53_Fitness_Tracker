@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest'
 import { prisma } from '@/lib/db'
+import { resetDb } from '@/test/reset'
 
 let userId: string
 let otherId: string
@@ -48,8 +49,7 @@ const patchReq = (body?: unknown) =>
 
 describe('live session endpoints', () => {
   beforeEach(async () => {
-    await prisma.workout.deleteMany()
-    await prisma.user.deleteMany()
+    await resetDb()
     await seedUsers()
   })
 

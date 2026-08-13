@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { prisma } from './db'
+import { resetDb } from '@/test/reset'
 
 async function makeUser(email: string) {
   return prisma.user.create({
@@ -10,8 +11,7 @@ async function makeUser(email: string) {
 
 describe('one in-progress workout per user', () => {
   beforeEach(async () => {
-    await prisma.workout.deleteMany()
-    await prisma.user.deleteMany()
+    await resetDb()
   })
 
   afterAll(async () => {

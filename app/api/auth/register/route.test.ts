@@ -2,6 +2,7 @@
 import { describe, it, expect, beforeEach, afterAll } from 'vitest'
 import { POST } from './route'
 import { prisma } from '@/lib/db'
+import { resetDb } from '@/test/reset'
 import { verifyPassword } from '@/lib/password'
 
 const request = (body: unknown) =>
@@ -13,7 +14,7 @@ const request = (body: unknown) =>
 
 describe('POST /api/auth/register', () => {
   beforeEach(async () => {
-    await prisma.user.deleteMany()
+    await resetDb()
   })
 
   afterAll(async () => {

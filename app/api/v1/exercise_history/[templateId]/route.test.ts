@@ -1,6 +1,7 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterAll, vi } from 'vitest'
 import { prisma } from '@/lib/db'
+import { resetDb } from '@/test/reset'
 
 let userId: string
 let otherId: string
@@ -54,9 +55,7 @@ const req = () => new Request('http://localhost/api/v1/exercise_history/x')
 
 describe('GET /api/v1/exercise_history/[templateId]', () => {
   beforeEach(async () => {
-    await prisma.workout.deleteMany()
-    await prisma.exerciseTemplate.deleteMany()
-    await prisma.user.deleteMany()
+    await resetDb()
     await seed()
   })
 
