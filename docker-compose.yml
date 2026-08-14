@@ -1,0 +1,27 @@
+# Explicit project name so every container, network and volume created here is
+# namespaced to this app and cannot collide with other compose projects.
+name: fitness-tracker
+
+services:
+  db:
+    image: postgres:16
+    container_name: fitness-tracker-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: fitness
+      POSTGRES_PASSWORD: fitness
+      POSTGRES_DB: fitness
+    # Host port 5433, not 5432: a native Postgres already owns 5432 on this machine.
+    # Inside the container it is still 5432.
+    ports:
+      - '5433:5432'
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fitness -d fitness']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  pgdata:

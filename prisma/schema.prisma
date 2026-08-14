@@ -1,0 +1,166 @@
+// Prisma 7: the generator is "prisma-client" and `output` is required.
+// The datasource URL lives in prisma.config.ts, not here.
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum UnitSystem {
+  METRIC
+  IMPERIAL
+}
+
+enum WorkoutStatus {
+  IN_PROGRESS
+  COMPLETED
+}
+
+enum SetType {
+  WARMUP
+  NORMAL
+  FAILURE
+  DROPSET
+}
+
+// The eight types are combinations of four measurable fields; lib/workout/setKinds.ts
+// holds the mapping that drives which inputs a set row renders.
+enum ExerciseType {
+  WEIGHT_REPS
+  REPS_ONLY
+  BODYWEIGHT_REPS
+  BODYWEIGHT_ASSISTED_REPS
+  DURATION
+  WEIGHT_DURATION
+  DISTANCE_DURATION
+  SHORT_DISTANCE_WEIGHT
+}
+
+enum MuscleGroup {
+  ABDOMINALS
+  SHOULDERS
+  BICEPS
+  TRICEPS
+  FOREARMS
+  QUADRICEPS
+  HAMSTRINGS
+  CALVES
+  GLUTES
+  ABDUCTORS
+  ADDUCTORS
+  LATS
+  UPPER_BACK
+  TRAPS
+  LOWER_BACK
+  CHEST
+  CARDIO
+  NECK
+  FULL_BODY
+  OTHER
+}
+
+enum EquipmentCategory {
+  NONE
+  BARBELL
+  DUMBBELL
+  KETTLEBELL
+  MACHINE
+  PLATE
+  RESISTANCE_BAND
+  SUSPENSION
+  OTHER
+}
+
+model User {
+  id           String     @id @default(cuid())
+  email        String     @unique
+  passwordHash String
+  name         String
+  unitSystem   UnitSystem @default(METRIC)
+  createdAt    DateTime   @default(now())
+
+  workouts        Workout[]
+  customExercises ExerciseTemplate[]
+}
+
+model ExerciseTemplate {
+  id                    String            @id @default(cuid())
+  title                 String
+  type                  ExerciseType
+  primaryMuscleGroup    MuscleGroup
+  // Sets count against primary and secondary muscles for per-muscle volume later.
+  secondaryMuscleGroups MuscleGroup[]
+  equipmentCategory     EquipmentCategory
+  isCustom              Boolean           @default(false)
+  // null = seeded catalog entry, set = a user's own custom exercise
+  ownerId               String?
+  createdAt             DateTime          @default(now())
+
+  owner            User?             @relation(fields: [ownerId], references: [id], onDelete: Cascade)
+  workoutExercises WorkoutExercise[]
+
+  @@index([ownerId])
+  @@index([title])
+}
+
+model Workout {
+  id          String        @id @default(cuid())
+  userId      String
+  title       String
+  description String?
+  status      WorkoutStatus @default(IN_PROGRESS)
+  startTime   DateTime      @default(now())
+  endTime     DateTime?
+  // The live session, held as a blob so autosave is a single-row write.
+  // Nulled on finish, once normalized into WorkoutExercise/SetEntry rows.
+  draft       Json?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  user      User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  exercises WorkoutExercise[]
+
+  @@index([userId, status])
+  @@index([userId, startTime])
+}
+
+model WorkoutExercise {
+  id                 String  @id @default(cuid())
+  workoutId          String
+  exerciseTemplateId String
+  index              Int
+  notes              String?
+  // Both columns exist without UI: supersets and the rest-timer countdown ship later,
+  // and adding them now avoids a migration on a table that will hold real rows.
+  supersetId         Int?
+  restSeconds        Int?
+
+  workout  Workout          @relation(fields: [workoutId], references: [id], onDelete: Cascade)
+  template ExerciseTemplate @relation(fields: [exerciseTemplateId], references: [id])
+  sets     SetEntry[]
+
+  @@index([workoutId])
+  @@index([exerciseTemplateId])
+}
+
+model SetEntry {
+  id                String  @id @default(cuid())
+  workoutExerciseId String
+  index             Int
+  type              SetType @default(NORMAL)
+  // Flat nullable measurements: only the fields an exercise's type uses are populated.
+  // There is no `completed` column — completion is draft-only state.
+  weightKg          Float?
+  reps              Int?
+  distanceMeters    Float?
+  durationSeconds   Int?
+  rpe               Float?
+  customMetric      Float?
+
+  workoutExercise WorkoutExercise @relation(fields: [workoutExerciseId], references: [id], onDelete: Cascade)
+
+  @@index([workoutExerciseId])
+}

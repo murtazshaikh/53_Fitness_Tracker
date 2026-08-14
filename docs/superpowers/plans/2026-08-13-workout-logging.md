@@ -6,7 +6,7 @@
 
 **Architecture:** Next.js App Router with the backend inside it — API route handlers plus Server Components, Prisma over Postgres. The live session lives in client state mirrored to `localStorage` and is autosaved to the server as a single JSON draft blob; on finish it is normalized into relational rows. All non-trivial logic lives in `lib/workout/` as pure functions with no Next.js or Prisma imports, so it is unit-testable without a server or database.
 
-**Tech Stack:** Next.js 15 (App Router), TypeScript, Prisma 6, Postgres 16 (Docker), Auth.js v5 (`next-auth@beta`) with credentials + `bcryptjs`, Zod, Tailwind CSS v4, Vitest, Playwright.
+**Tech Stack:** Bun 1.3 (package manager + runtime), Next.js 16 (App Router), TypeScript, Prisma 6, Postgres 16 (Docker), Auth.js v5 (`next-auth@beta`) with credentials + `bcryptjs`, Zod, Tailwind CSS v4, Vitest, Playwright.
 
 ## Global Constraints
 
@@ -18,7 +18,11 @@
 - **`lib/workout/` must not import** from `next`, `@prisma/client`, or any React package. It is plain functions over plain data.
 - **Every API handler resolves `userId` from the server session** and scopes its queries by it. The client never sends a user id.
 - **`null` means absent, never zero.** A `restSeconds` of `null` is "no timer"; a `weightKg` of `null` is "not applicable to this exercise type".
-- Node 22, npm 11.
+- **Bun is the package manager and script runner** (`bun add`, `bun run`, `bunx`). Bun runs TypeScript directly, so no `tsx`.
+- **Vitest is the test runner, not `bun test`** — the API tests use `vi.doMock` and the autosave test uses `vi.useFakeTimers`; the `bun:test` equivalents differ in hoisting and reset semantics.
+- **Postgres publishes on host port 5433**, not 5432, which a native Postgres already owns on this machine.
+- **Next.js 16 differs from training data.** Consult `node_modules/next/dist/docs/` before writing framework code.
+- Bun 1.3, Node 22 available as a fallback.
 
 ---
 
@@ -84,23 +88,48 @@
 
 **Interfaces:**
 - Consumes: nothing.
-- Produces: a working `npm test` (Vitest) and `npm run dev` (Next.js); Postgres reachable at `DATABASE_URL`.
+- Produces: a working `bun run test` (Vitest) and `bun run dev` (Next.js); Postgres reachable at `DATABASE_URL`.
 
 - [ ] **Step 1: Create the Next.js app**
 
+`create-next-app` derives the package name from the directory, and npm forbids capital
+letters, so it refuses to scaffold into `53_Fitness_Tracker` directly. Scaffold into a
+temporary directory and copy the result in:
+
 ```bash
-cd /Users/murtaza/pro/coding/53_Fitness_Tracker
-npx create-next-app@latest . --typescript --tailwind --app --src-dir=false \
-  --import-alias="@/*" --eslint --no-turbopack --yes
+cd /tmp
+bunx create-next-app@latest fitness-tracker --typescript --tailwind --app \
+  --eslint --import-alias="@/*" --disable-git --yes
+
+cd /tmp/fitness-tracker
+for f in $(ls -A | grep -v '^node_modules$'); do
+  cp -R "$f" /Users/murtaza/pro/coding/53_Fitness_Tracker/
+done
 ```
 
-If it refuses because the directory is non-empty, that is expected — the repo has `docs/`. Answer yes to proceed; it does not delete existing files.
+`--disable-git` matters: the target is already a git repo. Do not pass `--no-turbopack`
+(not a valid flag) and do not pass `--src-dir=false` (not valid syntax).
+
+Then fix two things the generator gets wrong for this project. It may create `src/` from a
+saved preference despite the flags, and the plan's file structure puts `app/` at the root:
+
+```bash
+cd /Users/murtaza/pro/coding/53_Fitness_Tracker
+rm -rf .next
+[ -d src/app ] && mv src/app app && rmdir src
+```
+
+Then edit `tsconfig.json` so the alias points at the repo root rather than `src/`:
+
+```json
+"paths": { "@/*": ["./*"] }
+```
 
 - [ ] **Step 2: Install runtime and test dependencies**
 
 ```bash
-npm install @prisma/client zod next-auth@beta bcryptjs
-npm install -D prisma vitest @vitejs/plugin-react vite-tsconfig-paths \
+bun add @prisma/client zod next-auth@beta bcryptjs
+bun add -d prisma vitest @vitejs/plugin-react vite-tsconfig-paths \
   @testing-library/react @testing-library/jest-dom jsdom @types/bcryptjs tsx
 ```
 
@@ -157,7 +186,7 @@ describe('test harness', () => {
 
 - [ ] **Step 5: Run it and verify it passes**
 
-Run: `npm test`
+Run: `bun run test`
 Expected: PASS, 1 test.
 
 - [ ] **Step 6: Add Postgres via Docker**
@@ -165,35 +194,51 @@ Expected: PASS, 1 test.
 Create `docker-compose.yml`:
 
 ```yaml
+# Explicit project name so every container, network and volume created here is
+# namespaced to this app and cannot collide with other compose projects.
+name: fitness-tracker
+
 services:
   db:
     image: postgres:16
+    container_name: fitness-tracker-db
     restart: unless-stopped
     environment:
       POSTGRES_USER: fitness
       POSTGRES_PASSWORD: fitness
       POSTGRES_DB: fitness
+    # Host port 5433, not 5432: a native Postgres already owns 5432 on this machine.
+    # Inside the container it is still 5432.
     ports:
-      - '5432:5432'
+      - '5433:5432'
     volumes:
       - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U fitness -d fitness']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
 volumes:
   pgdata:
 ```
 
-Create `.env.example` (commit this) and `.env` (do not commit — confirm `.env*` is in `.gitignore`, which `create-next-app` adds by default):
+This machine already runs other compose projects. Only ever run `docker compose` from this
+directory; never global commands like `docker system prune` or `docker stop $(docker ps -q)`.
+
+Create `.env.example` (commit this) and `.env` (do not commit). `create-next-app` adds `.env*` to `.gitignore`, which also ignores the example — add `!.env.example` below it:
 
 ```
-DATABASE_URL="postgresql://fitness:fitness@localhost:5432/fitness?schema=public"
+DATABASE_URL="postgresql://fitness:fitness@localhost:5433/fitness?schema=public"
 AUTH_SECRET="dev-secret-change-me"
 ```
 
-Generate a real secret for `.env` with `npx auth secret`.
+Generate a real secret for `.env` with `bunx auth secret`.
 
 - [ ] **Step 7: Start the database and verify it accepts connections**
 
 ```bash
-npm run db:up
+bun run db:up
 docker compose exec db pg_isready -U fitness
 ```
 
@@ -223,13 +268,15 @@ git commit -m "chore: scaffold Next.js app, Vitest harness, and Postgres"
 Create `prisma/schema.prisma`:
 
 ```prisma
+// Prisma 7: the generator is "prisma-client" and `output` is required.
+// The datasource URL lives in prisma.config.ts, not here.
 generator client {
-  provider = "prisma-client-js"
+  provider = "prisma-client"
+  output   = "../generated/prisma"
 }
 
 datasource db {
   provider = "postgresql"
-  url      = env("DATABASE_URL")
 }
 
 enum UnitSystem {
@@ -384,25 +431,51 @@ model SetEntry {
 Create `lib/db.ts`:
 
 ```ts
-import { PrismaClient } from '@prisma/client'
+import { PrismaClient } from '@/generated/prisma/client'
+import { PrismaPg } from '@prisma/adapter-pg'
+
+// Prisma 7 connects through a driver adapter rather than its own engine binary.
+const adapter = new PrismaPg({ connectionString: process.env.DATABASE_URL })
 
 const globalForPrisma = globalThis as unknown as { prisma?: PrismaClient }
 
-export const prisma = globalForPrisma.prisma ?? new PrismaClient()
+export const prisma = globalForPrisma.prisma ?? new PrismaClient({ adapter })
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = prisma
+```
+
+Prisma 7 also needs `prisma.config.ts` at the repo root, `@prisma/adapter-pg` and
+`dotenv` installed, and `/generated` added to `.gitignore`:
+
+```ts
+import 'dotenv/config'
+import { defineConfig } from 'prisma/config'
+
+export default defineConfig({
+  schema: 'prisma/schema.prisma',
+  migrations: { path: 'prisma/migrations' },
+  datasource: { url: process.env['DATABASE_URL'] },
+})
 ```
 
 - [ ] **Step 3: Generate the migration**
 
 ```bash
-npx prisma migrate dev --name init
+bunx prisma migrate dev --name init
 ```
 
-- [ ] **Step 4: Add the partial unique index by hand**
+- [ ] **Step 4: Add the partial unique index in its own migration**
 
-Prisma cannot express a partial index, so append this to the generated
-`prisma/migrations/<timestamp>_init/migration.sql`:
+Prisma cannot express a partial index. Do NOT edit the already-applied init migration —
+that changes its checksum and forces `migrate reset`, which destroys the database and
+which Prisma 7 refuses to run without explicit user consent. Create a separate migration
+instead:
+
+```bash
+bunx prisma migrate dev --create-only --name active_workout_partial_index
+```
+
+Then replace the generated (empty) `migration.sql` with:
 
 ```sql
 -- Enforce at most one in-progress workout per user.
@@ -412,10 +485,17 @@ CREATE UNIQUE INDEX "Workout_one_active_per_user"
   WHERE "status" = 'IN_PROGRESS';
 ```
 
-Re-apply it:
+Apply it:
 
 ```bash
-npx prisma migrate reset --force
+bunx prisma migrate dev
+```
+
+Verify the index exists with its WHERE clause:
+
+```bash
+docker compose exec -T db psql -U fitness -d fitness -tAc \
+  "select indexdef from pg_indexes where indexname='Workout_one_active_per_user';"
 ```
 
 - [ ] **Step 5: Write the failing test for the constraint**
@@ -480,8 +560,13 @@ describe('one in-progress workout per user', () => {
 
 - [ ] **Step 6: Run the tests**
 
-Run: `npx vitest run lib/db.test.ts`
-Expected: PASS, 3 tests. If the first test fails with "expected to throw", the partial index was not applied — re-check Step 4 and re-run `npx prisma migrate reset --force`.
+Run: `bunx vitest run lib/db.test.ts`
+Expected: PASS, 3 tests. If the first test fails with "expected to throw", the partial
+index was not applied — re-check Step 4 and re-run `bunx prisma migrate dev`.
+
+Two harness notes: the test file needs `// @vitest-environment node` as its first line
+(Prisma cannot run under jsdom), and `vitest.setup.ts` needs `import 'dotenv/config'`
+because Vitest does not populate `process.env` from `.env` on its own.
 
 - [ ] **Step 7: Commit**
 
@@ -618,7 +703,7 @@ describe('isAssistedType', () => {
 
 - [ ] **Step 3: Run it to verify it fails**
 
-Run: `npx vitest run lib/workout/setKinds.test.ts`
+Run: `bunx vitest run lib/workout/setKinds.test.ts`
 Expected: FAIL — "Failed to resolve import ./setKinds".
 
 - [ ] **Step 4: Write the implementation**
@@ -660,7 +745,7 @@ export function isAssistedType(type: ExerciseTypeWire): boolean {
 
 - [ ] **Step 5: Run the tests**
 
-Run: `npx vitest run lib/workout/setKinds.test.ts`
+Run: `bunx vitest run lib/workout/setKinds.test.ts`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 6: Commit**
@@ -774,7 +859,7 @@ describe('formatDuration', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run lib/workout/units.test.ts`
+Run: `bunx vitest run lib/workout/units.test.ts`
 Expected: FAIL — cannot resolve `./units`.
 
 - [ ] **Step 3: Write the implementation**
@@ -844,7 +929,7 @@ export function formatDuration(seconds: number): string {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run lib/workout/units.test.ts`
+Run: `bunx vitest run lib/workout/units.test.ts`
 Expected: PASS, 12 tests.
 
 - [ ] **Step 5: Commit**
@@ -968,7 +1053,7 @@ describe('summarize', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run lib/workout/summary.test.ts`
+Run: `bunx vitest run lib/workout/summary.test.ts`
 Expected: FAIL — cannot resolve `./summary`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1033,7 +1118,7 @@ export function summarize(sets: MeasurableSet[], system: UnitSystemWire): Workou
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run lib/workout/summary.test.ts`
+Run: `bunx vitest run lib/workout/summary.test.ts`
 Expected: PASS, 8 tests.
 
 - [ ] **Step 5: Commit**
@@ -1136,7 +1221,7 @@ describe('set serialization', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run lib/workout/serialize.test.ts`
+Run: `bunx vitest run lib/workout/serialize.test.ts`
 Expected: FAIL — cannot resolve `./serialize`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1206,7 +1291,7 @@ export function setFromWire(set: WireSet): DraftSet {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run lib/workout/serialize.test.ts`
+Run: `bunx vitest run lib/workout/serialize.test.ts`
 Expected: PASS, 5 tests.
 
 - [ ] **Step 5: Commit**
@@ -1349,7 +1434,7 @@ describe('validateAgainstTypes', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run lib/workout/draft.test.ts`
+Run: `bunx vitest run lib/workout/draft.test.ts`
 Expected: FAIL — cannot resolve `./draft`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1438,7 +1523,7 @@ export function validateAgainstTypes(
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run lib/workout/draft.test.ts`
+Run: `bunx vitest run lib/workout/draft.test.ts`
 Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
@@ -1571,7 +1656,7 @@ describe('normalizeDraft', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run lib/workout/normalize.test.ts`
+Run: `bunx vitest run lib/workout/normalize.test.ts`
 Expected: FAIL — cannot resolve `./normalize`.
 
 - [ ] **Step 3: Write the implementation**
@@ -1639,12 +1724,12 @@ export function normalizeDraft(draft: WorkoutDraft): NormalizedExercise[] {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run lib/workout/normalize.test.ts`
+Run: `bunx vitest run lib/workout/normalize.test.ts`
 Expected: PASS, 9 tests.
 
 - [ ] **Step 5: Run the whole suite to check nothing regressed**
 
-Run: `npm test`
+Run: `bun run test`
 Expected: PASS — all tests from Tasks 1–8.
 
 - [ ] **Step 6: Commit**
@@ -1889,7 +1974,7 @@ describe('seed exercises', () => {
 
 - [ ] **Step 3: Run it to verify it fails**
 
-Run: `npx vitest run prisma/exercises.test.ts`
+Run: `bunx vitest run prisma/exercises.test.ts`
 Expected: FAIL — cannot resolve `./exercises`, or (once written) a count/enum assertion fails.
 
 - [ ] **Step 4: Write the seed script**
@@ -1931,8 +2016,8 @@ main()
 - [ ] **Step 5: Run the tests and the seed**
 
 ```bash
-npx vitest run prisma/exercises.test.ts
-npm run db:seed
+bunx vitest run prisma/exercises.test.ts
+bun run db:seed
 ```
 
 Expected: 5 tests PASS; seed prints `Seeded 100 exercise templates` (or however many are in the list — at least 80).
@@ -1940,7 +2025,7 @@ Expected: 5 tests PASS; seed prints `Seeded 100 exercise templates` (or however 
 - [ ] **Step 6: Verify re-running the seed does not duplicate**
 
 ```bash
-npm run db:seed
+bun run db:seed
 ```
 
 Expected: the same count as before, not double.
@@ -2004,7 +2089,7 @@ describe('password hashing', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run lib/password.test.ts`
+Run: `bunx vitest run lib/password.test.ts`
 Expected: FAIL — cannot resolve `./password`.
 
 - [ ] **Step 3: Implement password hashing**
@@ -2027,7 +2112,7 @@ export async function verifyPassword(plain: string, hash: string): Promise<boole
 
 - [ ] **Step 4: Run the password tests**
 
-Run: `npx vitest run lib/password.test.ts`
+Run: `bunx vitest run lib/password.test.ts`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Configure Auth.js**
@@ -2194,7 +2279,7 @@ describe('POST /api/auth/register', () => {
 
 - [ ] **Step 7: Run it to verify it fails**
 
-Run: `npx vitest run app/api/auth/register/route.test.ts`
+Run: `bunx vitest run app/api/auth/register/route.test.ts`
 Expected: FAIL — cannot resolve `./route`.
 
 - [ ] **Step 8: Implement registration**
@@ -2240,20 +2325,24 @@ export async function POST(request: Request) {
 
 - [ ] **Step 9: Run the registration tests**
 
-Run: `npx vitest run app/api/auth/register/route.test.ts`
+Run: `bunx vitest run app/api/auth/register/route.test.ts`
 Expected: PASS, 6 tests.
 
 - [ ] **Step 10: Protect the app routes**
 
-Create `middleware.ts` at the repo root:
+Next 16 renamed `middleware.ts` to `proxy.ts`. This is not cosmetic: Middleware ran on the
+Edge Runtime, where Prisma's generated client fails because it imports `node:path`. Proxy
+defaults to the Node.js runtime, so importing `@/lib/auth` (and through it Prisma) works.
+Using `middleware.ts` here builds with warnings and breaks at runtime.
+
+Create `proxy.ts` at the repo root:
 
 ```ts
 import { auth } from '@/lib/auth'
 
 export default auth((req) => {
   if (!req.auth) {
-    const url = new URL('/login', req.nextUrl.origin)
-    return Response.redirect(url)
+    return Response.redirect(new URL('/login', req.nextUrl.origin))
   }
 })
 
@@ -2261,6 +2350,9 @@ export const config = {
   matcher: ['/workout/:path*', '/history/:path*', '/exercises/:path*'],
 }
 ```
+
+Verify: `curl -s -o /dev/null -w "%{http_code} %{redirect_url}" localhost:3000/workout`
+should print `302 http://localhost:3000/login`.
 
 - [ ] **Step 11: Commit**
 
@@ -2452,7 +2544,7 @@ describe('live session endpoints', () => {
 
 - [ ] **Step 3: Run it to verify it fails**
 
-Run: `npx vitest run app/api/workouts/active/route.test.ts`
+Run: `bunx vitest run app/api/workouts/active/route.test.ts`
 Expected: FAIL — cannot resolve `../start/route`.
 
 - [ ] **Step 4: Implement start**
@@ -2590,7 +2682,7 @@ export async function DELETE() {
 
 - [ ] **Step 6: Run the tests**
 
-Run: `npx vitest run app/api/workouts/active/route.test.ts`
+Run: `bunx vitest run app/api/workouts/active/route.test.ts`
 Expected: PASS, 9 tests.
 
 - [ ] **Step 7: Write the failing finish test**
@@ -2799,7 +2891,7 @@ describe('POST /api/workouts/active/finish', () => {
 
 - [ ] **Step 8: Run it to verify it fails**
 
-Run: `npx vitest run app/api/workouts/active/finish/route.test.ts`
+Run: `bunx vitest run app/api/workouts/active/finish/route.test.ts`
 Expected: FAIL — cannot resolve `./route`.
 
 - [ ] **Step 9: Implement finish**
@@ -2908,7 +3000,7 @@ export async function POST() {
 
 - [ ] **Step 10: Run the finish tests**
 
-Run: `npx vitest run app/api/workouts/active/finish/route.test.ts`
+Run: `bunx vitest run app/api/workouts/active/finish/route.test.ts`
 Expected: PASS, 8 tests.
 
 - [ ] **Step 11: Commit**
@@ -3144,7 +3236,7 @@ describe('GET /api/v1/exercise_templates', () => {
 
 - [ ] **Step 3: Run it to verify it fails**
 
-Run: `npx vitest run app/api/v1/exercise_templates/route.test.ts`
+Run: `bunx vitest run app/api/v1/exercise_templates/route.test.ts`
 Expected: FAIL — cannot resolve `./route`.
 
 - [ ] **Step 4: Implement the exercise-templates endpoint**
@@ -3242,7 +3334,7 @@ export async function POST(request: Request) {
 
 - [ ] **Step 5: Run the tests**
 
-Run: `npx vitest run app/api/v1/exercise_templates/route.test.ts`
+Run: `bunx vitest run app/api/v1/exercise_templates/route.test.ts`
 Expected: PASS, 8 tests.
 
 - [ ] **Step 6: Write the failing test for exercise history**
@@ -3352,7 +3444,7 @@ describe('GET /api/v1/exercise_history/[templateId]', () => {
 
 - [ ] **Step 7: Run it to verify it fails**
 
-Run: `npx vitest run "app/api/v1/exercise_history/[templateId]/route.test.ts"`
+Run: `bunx vitest run "app/api/v1/exercise_history/[templateId]/route.test.ts"`
 Expected: FAIL — cannot resolve `./route`.
 
 - [ ] **Step 8: Implement exercise history**
@@ -3412,7 +3504,7 @@ export async function GET(
 
 - [ ] **Step 9: Run the tests**
 
-Run: `npx vitest run "app/api/v1/exercise_history/[templateId]/route.test.ts"`
+Run: `bunx vitest run "app/api/v1/exercise_history/[templateId]/route.test.ts"`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 10: Implement the workout read endpoints**
@@ -3510,7 +3602,7 @@ export async function GET(
 
 - [ ] **Step 11: Run the whole suite**
 
-Run: `npm test`
+Run: `bun run test`
 Expected: PASS — everything from Tasks 1–12.
 
 - [ ] **Step 12: Commit**
@@ -3584,7 +3676,7 @@ describe('SummaryStats', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run components/SummaryStats.test.tsx`
+Run: `bunx vitest run components/SummaryStats.test.tsx`
 Expected: FAIL — cannot resolve `./SummaryStats`.
 
 - [ ] **Step 3: Implement SummaryStats**
@@ -3634,7 +3726,7 @@ export function SummaryStats({
 
 - [ ] **Step 4: Run the SummaryStats tests**
 
-Run: `npx vitest run components/SummaryStats.test.tsx`
+Run: `bunx vitest run components/SummaryStats.test.tsx`
 Expected: PASS, 4 tests.
 
 - [ ] **Step 5: Write the failing SetRow test**
@@ -3761,7 +3853,7 @@ describe('SetRow', () => {
 
 - [ ] **Step 6: Run it to verify it fails**
 
-Run: `npx vitest run "app/(app)/workout/SetRow.test.tsx"`
+Run: `bunx vitest run "app/(app)/workout/SetRow.test.tsx"`
 Expected: FAIL — cannot resolve `./SetRow`.
 
 - [ ] **Step 7: Implement SetRow**
@@ -3919,7 +4011,7 @@ function round(n: number): number {
 
 - [ ] **Step 8: Run the SetRow tests**
 
-Run: `npx vitest run "app/(app)/workout/SetRow.test.tsx"`
+Run: `bunx vitest run "app/(app)/workout/SetRow.test.tsx"`
 Expected: PASS, 12 tests.
 
 - [ ] **Step 9: Commit**
@@ -4083,7 +4175,7 @@ describe('useWorkoutDraft', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run "app/(app)/workout/useWorkoutDraft.test.ts"`
+Run: `bunx vitest run "app/(app)/workout/useWorkoutDraft.test.ts"`
 Expected: FAIL — cannot resolve `./useWorkoutDraft`.
 
 - [ ] **Step 3: Implement the hook**
@@ -4229,7 +4321,7 @@ export function useWorkoutDraft(initial: WorkoutDraft) {
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run "app/(app)/workout/useWorkoutDraft.test.ts"`
+Run: `bunx vitest run "app/(app)/workout/useWorkoutDraft.test.ts"`
 Expected: PASS, 11 tests.
 
 - [ ] **Step 5: Commit**
@@ -4318,7 +4410,7 @@ describe('ExercisePicker', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run "app/(app)/workout/ExercisePicker.test.tsx"`
+Run: `bunx vitest run "app/(app)/workout/ExercisePicker.test.tsx"`
 Expected: FAIL — cannot resolve `./ExercisePicker`.
 
 - [ ] **Step 3: Implement the picker**
@@ -4433,7 +4525,7 @@ export function ExercisePicker({
 
 - [ ] **Step 4: Run the picker tests**
 
-Run: `npx vitest run "app/(app)/workout/ExercisePicker.test.tsx"`
+Run: `bunx vitest run "app/(app)/workout/ExercisePicker.test.tsx"`
 Expected: PASS, 6 tests.
 
 - [ ] **Step 5: Write the failing test for previous performance**
@@ -4498,7 +4590,7 @@ describe('previousBySetIndex', () => {
 
 - [ ] **Step 6: Run it to verify it fails**
 
-Run: `npx vitest run lib/workout/previous.test.ts`
+Run: `bunx vitest run lib/workout/previous.test.ts`
 Expected: FAIL — cannot resolve `./previous`.
 
 - [ ] **Step 7: Implement previous performance**
@@ -4562,7 +4654,7 @@ export function previousBySetIndex(
 
 - [ ] **Step 8: Run the tests**
 
-Run: `npx vitest run lib/workout/previous.test.ts`
+Run: `bunx vitest run lib/workout/previous.test.ts`
 Expected: PASS, 7 tests.
 
 - [ ] **Step 9: Implement the active workout screen**
@@ -4841,14 +4933,14 @@ export function StartWorkoutButton() {
 - [ ] **Step 11: Verify the screen renders in the browser**
 
 ```bash
-npm run dev
+bun run dev
 ```
 
 Visit `http://localhost:3000/workout`. Expected: redirected to `/login` (middleware from Task 10). After Task 16 adds the login page, this becomes the real check.
 
 - [ ] **Step 12: Run the whole suite**
 
-Run: `npm test`
+Run: `bun run test`
 Expected: PASS.
 
 - [ ] **Step 13: Commit**
@@ -4911,7 +5003,7 @@ describe('toHistoryRow', () => {
 
 - [ ] **Step 2: Run it to verify it fails**
 
-Run: `npx vitest run lib/workout/historyRows.test.ts`
+Run: `bunx vitest run lib/workout/historyRows.test.ts`
 Expected: FAIL — cannot resolve `./historyRows`.
 
 - [ ] **Step 3: Implement history rows**
@@ -4956,7 +5048,7 @@ export function toHistoryRow(workout: WorkoutLike, system: UnitSystemWire): Hist
 
 - [ ] **Step 4: Run the tests**
 
-Run: `npx vitest run lib/workout/historyRows.test.ts`
+Run: `bunx vitest run lib/workout/historyRows.test.ts`
 Expected: PASS, 3 tests.
 
 - [ ] **Step 5: Build the auth pages**
@@ -5239,8 +5331,8 @@ export default async function ExercisesPage() {
 - [ ] **Step 8: Run the whole suite and the dev server**
 
 ```bash
-npm test
-npm run dev
+bun run test
+bun run dev
 ```
 
 Register at `http://localhost:3000/register`, then confirm `/workout`, `/history`, and `/exercises` all load.
@@ -5262,13 +5354,13 @@ git commit -m "feat: add auth pages, workout history, and exercise library"
 
 **Interfaces:**
 - Consumes: the running app from Tasks 1–16.
-- Produces: `npm run test:e2e`.
+- Produces: `bun run test:e2e`.
 
 - [ ] **Step 1: Install Playwright**
 
 ```bash
-npm install -D @playwright/test
-npx playwright install chromium
+bun add -d @playwright/test
+bunx playwright install chromium
 ```
 
 - [ ] **Step 2: Configure it**
@@ -5283,7 +5375,7 @@ export default defineConfig({
   timeout: 30_000,
   use: { baseURL: 'http://localhost:3000' },
   webServer: {
-    command: 'npm run dev',
+    command: 'bun run dev',
     url: 'http://localhost:3000',
     reuseExistingServer: true,
     timeout: 60_000,
@@ -5358,9 +5450,9 @@ test('a draft survives a page reload', async ({ page }) => {
 - [ ] **Step 4: Run it**
 
 ```bash
-npm run db:up
-npm run db:seed
-npm run test:e2e
+bun run db:up
+bun run db:seed
+bun run test:e2e
 ```
 
 Expected: 2 tests PASS.
